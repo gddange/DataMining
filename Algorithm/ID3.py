@@ -93,7 +93,7 @@ def createTree(rootDj,attrlist):
 	for key in valueDict.keys():
 		childtree = {}
 		if len(attrlist) == 1:
-			break
+			continue
 		if len(valueDict[key]['buy'].unique()) == 1:
 			tree[key] = valueDict[key]['buy'].unique()[0]
 		else:
