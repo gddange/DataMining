@@ -76,8 +76,8 @@ for i in range(len(test_water)):
 for i in range(len(test_normal)):
 	normal_Y.append(1)
 	X = mat(np.array(test_normal.iloc[i]))
-	test_p = Bayes(func(normal_means,common_cov,X),func(water_means,common_cov,X))    #当两个分布使用同样的协方差矩阵之后预测准确率确实提高了
-	if test_p > 0.5:
+	test_p = Bayes(func(water_means,common_cov,X),func(normal_means,common_cov,X))    #当两个分布使用同样的协方差矩阵之后预测准确率确实提高了
+	if test_p < 0.5:
 		normalp_Y.append(1)
 	else:
 		normalp_Y.append(0)
