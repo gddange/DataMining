@@ -76,8 +76,25 @@ def smoSimple(dataMat,classLabels,C,toler,maxIter):
 		print("iter is %d"%iter)
 	return b,alphas
 
+#核转换
+def kernelTrans(X,A,kTup):
+	'''计算的数据和A的核函数'''
+	m,n = shape(X)
+	K = mat(zeros((m,1)))
+	if kTup[0] == 'lin':     #线性基，就是直接计算数据的内积
+		K = X*A.T
+	elif kTup[0] == 'rbf':
+		'''径向基RBF，需要先计算两个数据之间的距离'''
+		for j in range(m):
+			deltaRow = X[j,:] - A
+			K[j] = deltaRow*deltaRow.T
+		K = exp(-K/(-1*kTup[1]**2))
+	else:
+		raise NameError('Houston we have a problem--That kernel is not recongnized.')
+	return K
+
 class optStruct:
-	def __init__(self,dataMatIn,classLabels,C,toler):
+	def __init__(self,dataMatIn,classLabels,C,toler,kTup):
 		self.X = dataMatIn
 		self.labelMat = classLabels
 		self.C = C
@@ -86,10 +103,13 @@ class optStruct:
 		self.alphas = mat(zeros((self.m,1)))
 		self.b = 0
 		self.eCache = mat(zeros((self.m,2)))      #这个缓存E的数组，第一列是E是否有效的标志，第二列是E的实际值
+		self.K = mat(zeros((self.m,self.m)))      #定义核函数矩阵，这是一个对称矩阵
+		for i in range(m):                        #计算核函数矩阵
+			self.K[i,:] = kernelTrans(self.X,self.X[i,:],kTup)
 
 def calcEk(oS,k):
 	'''计算os这个数据集的第k个数据的函数值以及预测误差'''
-	fxk = float(multiply(oS.alphas,oS.labelMat).T*(oS.X*oS.X[k,:].T)) + oS.b
+	fxk = float(multiply(oS.alphas,oS.labelMat).T*(oS.K[:,k])) + oS.b
 	Ek = fxk - float(oS.labelMat[k])
 	return Ek
 
@@ -134,7 +154,7 @@ def innerL(oS,i):
 			H = min(oS.C,oS.alphas[j] + oS.alphas[i])
 		if(L == H):print("L == H"); return 0
 		#更新alpha j
-		eta = 2*oS.X[i,:]*oS.X[j,:].T - oS.X[i,:]*oS.X[i,:].T - oS.X[j,:]*oS.X[j,:].T
+		eta = 2*oS.K[i,j] - oS.K[i,i]- oS.K[j,j]
 		if eta>=0:print("eta >= 0");return 0
 		oS.alphas[j] -= oS.labelMat[j]*(Ei - Ej)/eta
 		oS.alphas[j] = clipAlpha(oS.alphas[j],L,H)
@@ -146,14 +166,11 @@ def innerL(oS,i):
 		oS.alphas[i] +=oS.labelMat[i]*oS.labelMat[j]*(alphaJold - oS.alphas[j])
 		updateEk(oS,i)
 		#更新b
-		b1 = oS.b - Ei- oS.labelMat[i]*(oS.alphas[i]-alphaIold)*oS.X[i,:]*oS.X[i,:].T - oS.labelMat[j]*(oS.alphas[j]-alphaJold)*oS.X[i,:]*oS.X[j,:].T
-		b2 = oS.b - Ej- oS.labelMat[i]*(oS.alphas[i]-alphaIold)*oS.X[i,:]*oS.X[j,:].T - oS.labelMat[j]*(oS.alphas[j]-alphaJold)*oS.X[j,:]*oS.X[j,:].T
-		if(oS.alphas[i] < oS.C) and (oS.alphas[i] > 0):
-			oS.b = b1
-		elif(oS.alphas[j] < oS.C) and (oS.alphas[j] > 0):
-			oS.b = b2
-		else:
-			oS.b = (b1+b2)/2.0
+		b1 = oS.b - Ei- oS.labelMat[i]*(oS.alphas[i]-alphaIold)*oS.K[i,i] - oS.labelMat[j]*(oS.alphas[j]-alphaJold)*oS.K[i,j]
+		b2 = oS.b - Ej- oS.labelMat[i]*(oS.alphas[i]-alphaIold)*oS.K[i,j] - oS.labelMat[j]*(oS.alphas[j]-alphaJold)*oS.K[j,j]
+		if(oS.alphas[i] < oS.C) and (oS.alphas[i] > 0):oS.b = b1
+		elif(oS.alphas[j] < oS.C) and (oS.alphas[j] > 0):oS.b = b2
+		else:oS.b = (b1+b2)/2.0
 		return 1
 	else:return 0
 
@@ -190,12 +207,40 @@ def calcW(alphas,dataArr,classLabels):
 		w += multiply(alphas[i]*labelMat[i],X[i,:].T)
 	return w
 
+def testRbf(k1 = 1.3):
+	dataArr,labelArr = loadData('testSetRBF.txt')
+	b,alphas = smoP(dataArr,labelArr,200,0.0001,10000,('rbf',k1))
+	dataMat = mat(dataArr);labelMat = mat(labelArr).T
+	svInd = nonzero(alphas.A > 0)[0]
+	sVs = dataMat[svInd]
+	labelSV = labelMat[svInd]
+	print("there are %d Support Vectors"%shape(sVs)[0])
+	m,n = shape(dataMat)
+	errCount = 0
+	for i in range(m):
+		kernelEval = kernelTrans(sVs,dataMat[i,:],('rbf',k1))
+		predict = kernelEval.T * multiply(labelSV,alphas[svInd]) + b    #计算经过映射以后的函数值
+		if sign(predict) != sign(labelArr[i]):errCount +=1              #预测的符号和实际的符号如果不相同则代表预测错误
+	print("the training error rate is: %f"%float(errCount)/m)
+	dataArr,labelArr = loadData('testSetRBF2.txt')
+	errCount = 0
+	dataMat = mat(dataArr);labelMat = mat(labelArr).T
+	m,n = shape(dataMat)
+	for i in range(m):
+		kernelEval = kernelTrans(sVs,dataMat[i,:],('rbf',k1))
+		predict = kernelEval.T*multiply(labelSV,alphas[svInd]) + b
+		if sign(predict) != sign(labelArr[i]):errCount +=1
+	print("the test error rate is: %f"%float(errCount)/m)
+
 if __name__ == "__main__":
+	'''
 	dataMat,labelMat = loadData('testSet.txt')
 	b,alphas = smoP(dataMat,labelMat,0.6,0.001,40)
 	ws = calcW(alphas,dataMat,labelMat)
 	fx0 = dataMat[0]*mat(ws) + b
 	print(fx0,'     ',labelMat[0])
+	'''
+	testRbf()
 
 
 
